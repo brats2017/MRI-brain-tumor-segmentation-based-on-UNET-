@@ -1,1 +1,1242 @@
-to be released soon...
+
+# #!unzip BRATS_2017.zip
+
+
+# !cp -r path/to/google_drive_data_dir/ path/to/colab_data_dir
+
+
+from google.colab import files
+import json
+from google.colab import drive
+drive.mount('/content/drive')
+!mkdir -p local_modules/loadDataSet
+!pip install SimpleITK
+
+#!unzip -uq "/content/drive/My Drive/BRATS2017.zip" -d "/content/drive/My Drive/BRATS2017"
+
+ !mkdir -p local_modules/loadDataSet
+
+ !pip install SimpleITK
+
+DATA=  '/content/drive/My Drive/BRATS2017/Brats17TrainingData/'
+VALIDATION_DATA = '/content/drive/My Drive/BRATS2017/Brats17ValidationData/'
+DATA_HGG = DATA +'HGG/'
+DATA_LGG = DATA + 'LGG/'
+
+
+NUMPY_DIR =   '/content/drive/My Drive/BRATS2017/numpy_images_train/'
+VALIDATION_NUMPY_DIR =    '/content/drive/My Drive/BRATS2017/numpy_images_valid/'
+# NUMPY_DIR = '/content/drive/My Drive/Colab Notebooks/Unet_israel/numpy_images_train/'
+# VALIDATION_NUMPY_DIR = '/content/drive/My Drive/Colab Notebooks/Unet_israel/numpy_images_valid'
+FLAIR = 'flair'
+T1 = 't1'
+T2 = 't2'
+T1CE = 't1ce'
+
+img_type=['FLAIR', 'T1','T1CE', 'T2']
+
+import os, sys, glob
+import numpy as np
+import SimpleITK as sitk
+import sys
+import os
+import pandas as pd
+import re
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+from sklearn.utils import shuffle
+%matplotlib inline
+
+
+import pandas as pd
+import numpy as np
+
+from skimage.util.dtype import dtype_range
+from skimage.util import img_as_ubyte
+from skimage import exposure
+from skimage.morphology import disk
+from skimage.filters import rank
+from scipy.ndimage import gaussian_filter
+from skimage import data
+from skimage import img_as_float
+from skimage.morphology import reconstruction
+from scipy import ndimage
+import random
+
+red_multiplier = [1, 0.2, 0.2]
+green_multiplier = [0.35,0.75,0.25]
+blue_multiplier = [0,0.5,1.]#[0,0.25,0.9]
+yellow_multiplier = [1,1,0.25]
+brown_miltiplier = [40./255, 26./255, 13./255]
+my_colors=[blue_multiplier, yellow_multiplier, brown_miltiplier]
+
+img_type=['FLAIR', 'T1','T1CE', 'T2']
+
+ !mkdir -p local_modules/visualization_utils
+
+%%writefile local_modules/visualization_utils/__init__.py
+import sys
+import os
+import pandas as pd
+import re
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+import matplotlib.pylab as pylab
+import numpy as np
+
+params = {'legend.fontsize': 'x-large',
+          'figure.figsize': (6, 5),
+         'axes.labelsize': 'x-large',
+         'axes.titlesize':'x-large',
+         'xtick.labelsize':'x-large',
+         'ytick.labelsize':'x-large'}
+pylab.rcParams.update(params)
+#-----------------------------------------------------------
+def show_n_images(imgs, titles = None, enlarge = 20, cmap='jet'):
+    
+    plt.set_cmap(cmap)
+    n = len(imgs)
+    gs1 = gridspec.GridSpec(1, n)   
+    
+    fig1 = plt.figure(); # create a figure with the default size 
+    fig1.set_size_inches(enlarge, 2*enlarge);
+            
+    for i in range(n):
+
+        ax1 = fig1.add_subplot(gs1[i]) 
+
+        ax1.imshow(imgs[i], interpolation='none');
+        if (titles is not None):
+            ax1.set_title(titles[i])
+        ax1.set_ylim(ax1.get_ylim()[::-1])
+
+    plt.show();
+#--------------------------------------------------------------
+from skimage import io, color, img_as_float
+from skimage.exposure import adjust_gamma
+# Creates an image of original brain with segmentation overlay
+def show_lable_on_image(test_img, test_lbl):
+
+        modes = {'flair':0, 't1':1, 't1c':2, 't2':3}
+
+        label_im = test_lbl
+        
+        ones = np.argwhere(label_im == 1)
+        twos = np.argwhere(label_im == 2)
+        threes = np.argwhere(label_im == 3)
+        fours = np.argwhere(label_im == 4)
+
+        gray_img = img_as_float(test_img/test_img.max())
+
+        # adjust gamma of image
+        image = adjust_gamma(color.gray2rgb(gray_img), 0.45)
+        #sliced_image = image.copy()
+
+        red_multiplier = [1, 0.2, 0.2]
+        green_multiplier = [0.35,0.75,0.25]
+        blue_multiplier = [0,0.5,1.]#[0,0.25,0.9]
+        yellow_multiplier = [1,1,0.25]
+        brown_miltiplier = [40./255, 26./255, 13./255]
+
+        # change colors of segmented classes
+        for i in range(len(ones)):
+            image[ones[i][0]][ones[i][1]] = blue_multiplier#red_multiplier
+        for i in range(len(twos)):
+            image[twos[i][0]][twos[i][1]] = yellow_multiplier 
+        for i in range(len(threes)):
+            image[threes[i][0]][threes[i][1]] = brown_miltiplier#blue_multiplier
+        for i in range(len(fours)):
+            image[fours[i][0]][fours[i][1]] = green_multiplier#yellow_multiplier
+
+        return image
+#-------------------------------------------------------------------------------------
+def show_lable_on_image4(test_img, label_im):
+        
+    alpha = 0.8
+
+    img = img_as_float(test_img/test_img.max())
+    rows, cols = img.shape
+
+    # Construct a colour image to superimpose
+    color_mask = np.zeros((rows, cols, 3))
+    red_multiplier = [1, 0.2, 0.2]
+    green_multiplier = [0.35,0.75,0.25]
+    blue_multiplier = [0,0.25,0.9]
+    yellow_multiplier = [1,1,0.25]
+    brown_miltiplier = [40./255, 26./255, 13./255]
+    
+        
+    color_mask[label_im==1] = blue_multiplier#[1, 0, 0]  # Red block
+    color_mask[label_im==2] = yellow_multiplier#[0, 1, 0] # Green block
+    color_mask[label_im==3] = brown_miltiplier#[0, 0, 1] # Blue block
+    color_mask[label_im==4] = green_multiplier#[0, 1, 1] # Blue block
+
+    # Construct RGB version of grey-level image
+    img_color = np.dstack((img, img, img))
+
+    # Convert the input image and color mask to Hue Saturation Value (HSV)
+    # colorspace
+    img_hsv = color.rgb2hsv(img_color)
+    color_mask_hsv = color.rgb2hsv(color_mask)
+
+    # Replace the hue and saturation of the original image
+    # with that of the color mask
+    img_hsv[..., 0] = color_mask_hsv[..., 0]
+    img_hsv[..., 1] = color_mask_hsv[..., 1] * alpha
+
+    img_masked = color.hsv2rgb(img_hsv)
+
+    return img_masked
+#------------------------------------------------------------------------------
+# DL visualizations
+
+def drow_history(history):
+    
+    # list all data in history
+    if (not type(history)==dict):
+        history=history.history
+    print(history.keys())
+    plt.figure(figsize=(7,4))
+    plt.plot(history['loss'])
+    plt.plot(history['val_loss'])
+    plt.title('model loss')
+    plt.ylabel('loss')
+    plt.xlabel('epoch')
+    plt.legend(['train', 'test'], loc='upper left')
+    plt.show()
+    
+def drow_loss(history):
+    
+    # list all data in history
+    if (not type(history)==dict):
+        history=history.history
+
+    print(history.keys())
+    plt.figure(figsize=(6,5))
+    plt.plot(history['lr'], history['loss'])
+    plt.plot(history['lr'], history['val_loss'])
+    plt.title('model loss by learning rate')
+    plt.ylabel('loss')
+    plt.xlabel('learning rate')
+    plt.legend(['train', 'test'], loc='upper left')
+    plt.show()
+    
+def append_history(history1, history2):
+    
+    if (type(history1)==dict):
+        if (not type(history2)==dict):
+            history2 = history2.history
+            for key in history1:
+                history1[key] = history1[key] + history2[key]
+            return history1
+    
+    if (not type(history1)==dict):
+        if (type(history2)==dict):
+            
+            for key in history1.history:
+                history1.history[key] = history1.history[key] + history2[key]
+            return history1
+        
+    for key in history1.history:
+        history1.history[key] = history1.history[key] + history2.history[key]
+    return history1
+
+import sys
+sys.path.append('local_modules')
+from importlib import reload  # Python 3.4+ only.
+import visualization_utils  as vu
+reload(vu)
+
+def show_img_lable(img, lbl, modality = 0):
+    
+    if (len(lbl.shape)> 2):
+        lbl[0,0,3]=1 # for uniqe colors in plot
+        lbl = lbl_from_cat(lbl)
+    vu.show_n_images([img[:,:,modality],lbl, show_lable_on_image4(img[:,:,modality],lbl)],
+                    titles = [img_type[modality], 'Label', 'Label on '+ img_type[modality]]);
+
+def read_img_sitk(img):
+    inputImage = sitk.ReadImage( img )
+    inputImage = sitk.Cast( inputImage, sitk.sitkFloat32 )
+    image = sitk.GetArrayFromImage(inputImage)
+    return image
+
+# ima files are of the form
+
+# Brats17_2013_2_1_flair.nii.gz
+
+
+def read_image_into_numpy(dirpath):
+    
+    img_id = os.path.basename(dirpath)
+    np_image=np.zeros((4, 155, 240, 240), dtype=np.float32)
+    
+    ## Flair
+    flair_img = os.path.join(dirpath, img_id+'_flair.nii.gz')
+    if (not os.path.isfile(flair_img)):
+        print(flair_img,' not found aborting')
+        return None
+    np_image[0] = read_img_sitk(flair_img)
+        
+    ## T1
+    t1_nb4_img = os.path.join(dirpath, img_id+'_t1_nb4.nii.gz')
+    if (not os.path.isfile(t1_nb4_img)):
+        #print(t1_nb4_img,' not found')
+        t1_img = os.path.join(dirpath, img_id+'_t1.nii.gz')
+        if (not os.path.isfile(t1_img)):
+            print(t1_img,' not found aborting')
+            return None
+        np_image[1] = read_img_sitk(t1_img)
+    else:
+        np_image[1] = read_img_sitk(t1_nb4_img)    
+          ## T1CE
+    t1ce_nb4_img = os.path.join(dirpath, img_id+'_t1ce_nb4.nii.gz')
+    if (not os.path.isfile(t1ce_nb4_img)):
+        #print(t1ce_nb4_img,' not found')
+        t1ce_img = os.path.join(dirpath, img_id+'_t1ce.nii.gz')
+        if (not os.path.isfile(t1ce_img)):
+            print(t1ce_img,' not found aborting')
+            return None
+        np_image[2] = read_img_sitk(t1ce_img)
+    else:
+        np_image[2] = read_img_sitk(t1ce_nb4_img)    
+    
+        
+    ## T2
+    t2_img = os.path.join(dirpath, img_id+'_t2.nii.gz')
+    if (not os.path.isfile(t2_img)):
+        print(t2_img,' not found aborting')
+        return None
+    np_image[3] = read_img_sitk(t2_img)
+
+    return np_image
+
+def read_lable_into_numpy(dirpath):
+    
+    img_id = os.path.basename(dirpath)
+    np_image=np.zeros((155, 240, 240), dtype=np.int)
+    
+    ## lable
+    lable_img = os.path.join(dirpath, img_id+'_seg.nii.gz')
+    if (not os.path.isfile(lable_img)):
+        print(lable_img,' not found aborting')
+        return None
+    np_image = read_img_sitk(lable_img).astype(int)
+
+    return np_image
+
+hgg_paths = []
+for dirpath, dirnames, files in os.walk(DATA_HGG):
+    if ('Brats17' in dirpath):
+        hgg_paths.append(dirpath)
+
+       
+
+lgg_paths = []
+for dirpath, dirnames, files in os.walk(DATA_LGG):
+    if ('Brats17' in dirpath):
+        lgg_paths.append(dirpath)
+        
+val_paths = []
+for dirpath, dirnames, files in os.walk(VALIDATION_DATA):
+    if ('Brats17' in dirpath):
+        val_paths.append(dirpath)
+
+df_paths = []
+for dirpath, dirnames, files in os.walk(NUMPY_DIR):
+    if ('Brats17' in dirpath):
+        df_paths.append(dirpath)        
+
+
+len(lgg_paths),len(hgg_paths),len(val_paths)
+
+
+
+def bbox2_3D(img):
+
+    r = np.any(img, axis=(1, 2))
+    c = np.any(img, axis=(0, 2))
+    z = np.any(img, axis=(0, 1))
+
+    rmin, rmax = np.where(r)[0][[0, -1]]
+    cmin, cmax = np.where(c)[0][[0, -1]]
+    zmin, zmax = np.where(z)[0][[0, -1]]
+
+    return [rmin, rmax, cmin, cmax, zmin, zmax]
+
+  #  np_img = read_image_into_numpy('/content/drive/My Drive/BRATS2017/Brats17TrainingData/HGG/Brats17_2013_2_1')
+   
+
+#  vu.show_n_images(np_img[:,50,:,:], titles=img_type)
+
+#  np_lbl = read_lable_into_numpy('/content/drive/My Drive/BRATS2017/Brats17TrainingData/HGG/Brats17_2013_2_1')
+
+
+# img1 = vu.show_lable_on_image4(np_img[1,100,:,:], np_lbl[100])
+# img2 = vu.show_lable_on_image(np_img[1,100,:,:], np_lbl[100])
+# vu.show_n_images([img1,img2,np_img[0,100]])
+
+label_type_shrt = ['background', 'necrotic',
+             'edema', 'enhancing']
+label_type = ['background', 'necrotic and non-enhancing tumor', 'edema', 'enhancing tumor']
+df = pd.DataFrame(columns=['Grade','id','lab0','lab1','lab2','lab3',
+                           'rmin','rmax','cmin','cmax','zmin','zmax'])
+
+# def fill_df_from_path(df, counter = 1,  paths = hgg_paths, grade='HGG'):
+#      i = 0
+#      sizeofList = len(paths) 
+#      while i <= sizeofList :
+#           if i == counter:
+#              f=(paths[counter]) 
+#           i += 1
+        
+#      np_img = read_image_into_numpy(f)
+#      np_lbl = read_lable_into_numpy(f)
+#      assert(np_lbl[np_lbl==3].sum()==0)
+#      np_lbl = np.where(np_lbl==4, 3, np_lbl)
+
+        
+#      new_img = np.zeros((155, 240, 240,4))
+#      for i in range(4):
+#          new_img[:,:,:,i] = np_img[i, :,:,:] 
+            
+#      nimg = os.path.join(NUMPY_DIR,  os.path.basename(f)+'.npy')
+#      np.save(nimg, new_img)
+#      nlbl = os.path.join(NUMPY_DIR,  os.path.basename(f)+'_lbl.npy')
+#      np.save(nlbl, np_lbl)
+
+#      lbls, repeats = np.unique(np_lbl, return_counts=True)
+#      lbl_counts=[0,0,0,0]
+#      for i in range(len(repeats)):
+#           lbl_counts[lbls[i]] = repeats[i]
+        
+
+#      vals = [grade] + [os.path.basename(f)] + lbl_counts + bbox2_3D(np_lbl)
+        
+#      df.loc[len(df)] = vals
+        
+#      return df
+
+# # 76
+# for x in range(1, 76):
+#    df = fill_df_from_path(df,counter = x, paths = lgg_paths, grade='LGG')
+#    print(x)
+   
+
+# #211
+# for x in range(1, 211):
+#    df = fill_df_from_path(df, counter = x,  paths = hgg_paths)
+#    print(x)
+
+
+df_val = pd.DataFrame(columns=['id','lab0','lab1','lab2','lab3'])
+
+# def fill_df_from_path(df=df_val,counter = 1, paths = val_paths):
+
+     
+    
+#         i = 0
+#         sizeofList = len(paths) 
+#         while i <= sizeofList :
+#           if i == counter:
+#              f=(paths[counter]) 
+#           i += 1
+#         np_img = read_image_into_numpy(f)
+
+#         new_img = np.zeros((155, 240, 240,4))
+#         for i in range(4):
+#             new_img[:,:,:,i] = np_img[i, :,:,:] 
+
+#         nimg = os.path.join(VALIDATION_NUMPY_DIR,  os.path.basename(f)+'.npy')
+#         np.save(nimg, new_img)
+        
+#         vals = [os.path.basename(f)]+[0,0,0,0]
+#         df.loc[len(df)] = vals
+        
+#         return df
+
+# #46
+# for x in range(1, 46):
+#   df_val = fill_df_from_path(df_val, counter = x, paths = val_paths)
+#   print(x)
+
+# from sklearn.model_selection import train_test_split
+# df_train, df_test = train_test_split(df, test_size=0.2)
+
+# df_train.to_csv('df_train.csv', index=False)
+# df_test.to_csv('df_test.csv',index=False)
+# df_val.to_csv('df_val.csv' ,index=False)
+
+df_train= pd.read_csv('df_train.csv')
+df_test= pd.read_csv('df_test.csv')
+df_val= pd.read_csv('df_val.csv')
+
+df_train.shape
+
+df[['lab' +str(i) for i in range(1,4)]].sum()
+
+
+df[['lab' +str(i) for i in range(1,4)]].sum().plot(kind='bar', color=my_colors,
+                                                   title='Lable distribution')
+
+from importlib import reload  # Python 3.4+ only.
+import visualization_utils  as vu
+from visualization_utils import show_lable_on_image4
+reload(vu)
+
+
+red_multiplier = [1, 0.2, 0.2]
+green_multiplier = [0.35,0.75,0.25]
+blue_multiplier = [0,0.5,1.] #[0,0.25,0.9]
+yellow_multiplier = [1,1,0.25]
+brown_miltiplier = [40./255, 26./255, 13./255]
+my_colors=[blue_multiplier, yellow_multiplier, brown_miltiplier]
+
+def show_img_lable(img, lbl, modality = 0):
+    
+    if (len(lbl.shape)> 2):
+        lbl[0,0,3]=1 # for uniqe colors in plot
+        lbl = lbl_from_cat(lbl)
+    vu.show_n_images([img[:,:,modality],lbl, show_lable_on_image4(img[:,:,modality],lbl)],
+                    titles = [img_type[modality], 'Label', 'Label on '+ img_type[modality]]);
+
+def show_lable(lbl):
+    
+    
+    vu.show_n_images([lbl[:,:,k] for k in range(4)]+[lbl_from_cat(lbl)],
+                 titles = label_type_shrt + ['Label'])
+
+def show_pred_im_lable(im, lb, pred):
+    
+    vu.show_n_images([im[:,:,1], lb[:,:], 
+                   show_lable_on_image4(im[:,:,1], lb[:,:]),
+                  show_lable_on_image4(im[:,:,1], pred[:,:])],
+                 titles=['Flair', 'Label', 'Label on T1', 'Prediction on Flair'])
+
+def show_pred_im(im, pred):
+    
+    vu.show_n_images([im[:,:,1], 
+                   im[:,:,0],pred,
+                  show_lable_on_image4(im[:,:,1], pred[:,:])],
+                 titles=['Flair','T1', 'Pred',  'Prediction on Flair'])
+
+df_train[['lab' +str(i) for i in range(1,4)]].sum().plot(kind='bar', color=my_colors,
+                                                   title='Lable distribution in Train data')
+
+df_test[['lab' +str(i) for i in range(1,4)]].sum().plot(kind='bar', color=my_colors,
+                                                   title='Lable distribution in Test data')
+
+#####Build Train generator
+
+def get_numpy_img_lbl(img_id = 'BraTS19_TCIA10_449_1', np_dir=NUMPY_DIR):
+    img=np.load(os.path.join(np_dir, img_id+'.npy'))
+    lbl=np.load(os.path.join(np_dir, img_id+'_lbl.npy'))
+    return img,lbl
+
+def get_random_img(axis=0, df=df_train, np_dir=NUMPY_DIR):
+    
+    ind = randrange(len(df))
+    img_id= df.iloc[ind].id
+    img,lbl = get_numpy_img_lbl(img_id, np_dir=NUMPY_DIR)
+        
+    if (axis==0):
+        x = randrange(df.iloc[ind].rmin, df.iloc[ind].rmax+1)
+        return img[ x,:,:, :], lbl[x,:,:]
+
+    im = np.zeros((240,240,4),dtype=np.float32)    
+    lb = np.zeros((240,240),dtype=np.int)
+        
+    if (axis==1):
+        y = randrange(df.iloc[ind].cmin, df.iloc[ind].cmax+1)
+        im[40:40+155,:,:]=img[:, y,:, :]
+        lb[40:40+155,:]=lbl[:, y,:]
+        return im,lb
+    
+    if (axis == 2):
+        z = randrange(df.iloc[ind].zmin, df.iloc[ind].zmax+1)
+        im[40:40+155,:,:]=img[:,:, z, :]
+        lb[40:40+155,:]=lbl[:,:,z]
+        return im,lb
+    return None
+
+from random import randrange
+from keras.utils import np_utils
+
+from google.colab import drive
+drive.mount('/content/drive')
+
+img,lbl = get_random_img(2)
+show_img_lable(img, lbl)
+
+def get_img_for_label(lab=2, axis=0, df=df_train,np_dir = NUMPY_DIR):
+    
+    img_id= random.choice(df[df['lab'+str(lab)] > 0].id.values)
+    
+    img,lbl = get_numpy_img_lbl(img_id, np_dir)
+    ind = np.where(lbl==lab)
+    k = random.randrange(len(ind[0]))
+    
+    if (axis==0):        
+        return img[ind[0][k],:,:] , lbl[ind[0][k],:,:]
+        
+    lb = np.zeros((240,240),dtype=np.int)
+    im = np.zeros((240,240,4),dtype=np.float32)
+    
+    if (axis==1):
+        im[40:40+155,:,:]=img[:, ind[1][k],:,:]
+        lb[40:40+155,:]=lbl[:, ind[1][k],:]
+        return im,lb
+    
+    if (axis == 2):
+        im[40:40+155,:,:]=img[:, :, ind[2][k],:]
+        lb[40:40+155,:]=lbl[:,:,ind[2][k]]
+        return im,lb
+    return None
+
+img,lbl = get_img_for_label(1,1)
+show_img_lable(img, lbl)
+
+
+img,lbl = get_img_for_label(3,0)
+show_img_lable(img, lbl)
+
+def lbl_from_cat(cat_lbl):
+    
+    lbl=0
+    if (len(cat_lbl.shape)==3):
+        for i in range(1,4):
+            lbl = lbl + cat_lbl[:,:,i]*i
+    elif (len(cat_lbl.shape)==4):
+        for i in range(1,4):
+            lbl = lbl + cat_lbl[:,:,:,i]*i
+    else:
+        print('Error in lbl_from_cat', cat_lbl.shape)
+        return None
+    return lbl
+
+def normalize_3D_image(img):
+    for z in range(img.shape[0]):
+        for k in range(4):
+            if (img[z,:,:,k].max()>0):
+                img[z,:,:,k] /= img[z,:,:,k].max()
+    return img
+
+def normalize_2D_image(img):
+
+        for c in range(4):
+            if (img[:,:,c].max()>0):
+                img[:,:,c] = img[:,:,c]/img[:,:,c].max()
+        return img
+
+def get_img_batch(row, np_dir=NUMPY_DIR):
+    
+    im,lb = get_numpy_img_lbl(row['id'], np_dir)
+    
+    n_im = row['rmax']-row['rmin']
+    rmin=row['rmin']
+    rmax=row['rmax']
+    
+    return normalize_3D_image(im[rmin:rmax]), np_utils.to_categorical(lb[rmin:rmax],4)
+
+im, lb = get_img_batch(df_test.iloc[0])
+im.shape, lb.shape
+#print(im)
+show_img_lable(im[6], lb[6])
+
+i=15
+show_lable(lb[i])
+
+def get_df_img_batch(df_batch, np_dir=NUMPY_DIR):
+    
+        n_images = (df_batch.rmax - df_batch.rmin).sum()
+        b_images = np.zeros((n_images, 240, 240, 4), np.float32)
+        b_label = np.zeros((n_images, 240, 240, 4), np.int8)    
+        ind=0
+        for index, row in df_batch.iterrows():
+ 
+            b_im, b_lb = get_img_batch(row, np_dir)
+            n_im = b_im.shape[0]
+            b_images[ind:ind+n_im] = b_im
+            b_label[ind:ind+n_im] = b_lb
+            ind+=n_im
+               
+        return b_images, b_label
+
+im, lb = get_df_img_batch(df_test.iloc[0:3])
+show_img_lable(im[100],lb[100])
+# pixels = list(im[100])
+# np.shape(im[100])
+# print(pixels)
+
+from keras.utils import np_utils
+def generate_im_test_batch(n_images = 3, batch_size=300, df = df_test, np_dir=NUMPY_DIR):
+
+    while 1:
+         
+        df_batch = df.sample(n_images)
+        b_images, b_label = get_df_img_batch(df_batch, np_dir)                    
+        b_images, b_label = shuffle(b_images, b_label)
+        if (batch_size > 0):
+            b_images = b_images[0:batch_size]
+            b_label = b_label[0:batch_size]
+            
+        yield b_images, b_label
+
+!pip install imgaug
+
+import imageio
+import numpy as np
+import imgaug as ia
+import imgaug.augmenters as iaa
+from imgaug.augmentables.segmaps import SegmentationMapOnImage
+
+
+from keras.utils import np_utils
+def generate_faste_train_batch(batch_size = 12, df = df_train ,np_dir=NUMPY_DIR):
+    
+    batch_images = np.zeros((batch_size, 240, 240, 4), np.float32)
+    batch_label = np.zeros((batch_size, 240, 240, 4), np.int8)    
+    
+    # lab1 22%
+    # lab2 58%
+    # lab3 18%
+
+    while 1:
+        
+        df_batch = df.sample(3)
+        b_images, b_label = get_df_img_batch(df_batch, np_dir)                    
+        b_images, b_label = shuffle(b_images, b_label)
+        batch_images[0:batch_size//2]=b_images[0:batch_size//2]
+        batch_label[0:batch_size//2]=b_label[0:batch_size//2]
+        
+        i=batch_size//2
+        # lab 1
+        nim = batch_size//4
+        for j in range(nim):
+            im,lbl = get_img_for_label(lab=1, axis=random.choice([0,1,2]), df=df)
+            batch_images[i] = normalize_2D_image(im)
+            batch_label[i] = np_utils.to_categorical(lbl, 4)
+            i+=1
+                        
+        # lab 3
+        nim = batch_size//4
+        for j in range(nim):
+            im,lbl = get_img_for_label(lab=3, axis=random.choice([0,1,2]), df=df)
+            batch_images[i] = normalize_2D_image(im)
+            batch_label[i] = np_utils.to_categorical(lbl, 4)
+            i+=1
+
+        batch_images, batch_label = shuffle(batch_images, batch_label)
+            
+        yield batch_images, batch_label
+
+!mkdir -p local_modules/model_unet
+
+%%writefile local_modules/model_unet/__init__.py
+import tensorflow as tf
+
+from keras.models import Model, load_model
+from keras.layers import Input, BatchNormalization, Activation, Dense, Dropout,UpSampling2D
+from keras.layers.core import Lambda, RepeatVector, Reshape
+from keras.layers.convolutional import Conv2D, Conv2DTranspose
+from keras.layers.pooling import MaxPooling2D, GlobalMaxPool2D
+from keras.layers.merge import concatenate, add
+
+
+IMG_HEIGHT = 240
+IMG_WIDTH = 240
+IMG_CHANNELS = 4
+# Build U-Net model
+dropout=0.2
+hn = 'he_normal'
+def unet(input_size = (IMG_HEIGHT,IMG_WIDTH,IMG_CHANNELS)):
+    
+    inputs = Input(input_size)
+    
+    conv1 = Conv2D(64, 3, activation = 'relu', padding = 'same', kernel_initializer = hn)(inputs)
+    conv1 = Conv2D(64, 3, activation = 'relu', padding = 'same', kernel_initializer = hn)(conv1)
+    pool1 = MaxPooling2D(pool_size=(2, 2))(conv1)
+    conv2 = Conv2D(128, 3, activation = 'relu', padding = 'same', kernel_initializer = hn)(pool1)
+    conv2 = Conv2D(128, 3, activation = 'relu', padding = 'same', kernel_initializer = hn)(conv2)
+    pool2 = MaxPooling2D(pool_size=(2, 2))(conv2)
+    conv3 = Conv2D(256, 3, activation = 'relu', padding = 'same', kernel_initializer = hn)(pool2)
+    conv3 = Conv2D(256, 3, activation = 'relu', padding = 'same', kernel_initializer = hn)(conv3)
+    pool3 = MaxPooling2D(pool_size=(2, 2))(conv3)
+    conv4 = Conv2D(512, 3, activation = 'relu', padding = 'same', kernel_initializer = hn)(pool3)
+    conv4 = Conv2D(512, 3, activation = 'relu', padding = 'same', kernel_initializer = hn)(conv4)
+    drop4 = Dropout(dropout)(conv4)
+    pool4 = MaxPooling2D(pool_size=(2, 2))(drop4)
+
+    conv5 = Conv2D(1024, 3, activation = 'relu', padding = 'same', kernel_initializer = hn)(pool4)
+    conv5 = Conv2D(1024, 3, activation = 'relu', padding = 'same', kernel_initializer = hn)(conv5)
+    drop5 = Dropout(dropout)(conv5)
+
+    up6 = Conv2D(512, 2, activation = 'relu', padding = 'same', kernel_initializer = hn)(UpSampling2D(size = (2,2))(drop5))
+    merge6 = concatenate([drop4,up6], axis = 3)
+    conv6 = Conv2D(512, 3, activation = 'relu', padding = 'same', kernel_initializer = hn)(merge6)
+    conv6 = Conv2D(512, 3, activation = 'relu', padding = 'same', kernel_initializer = hn)(conv6)
+
+    up7 = Conv2D(256, 2, activation = 'relu', padding = 'same', kernel_initializer = hn)(UpSampling2D(size = (2,2))(conv6))
+    merge7 = concatenate([conv3,up7], axis = 3)
+    conv7 = Conv2D(256, 3, activation = 'relu', padding = 'same', kernel_initializer = hn)(merge7)
+    conv7 = Conv2D(256, 3, activation = 'relu', padding = 'same', kernel_initializer = hn)(conv7)
+
+    up8 = Conv2D(128, 2, activation = 'relu', padding = 'same', kernel_initializer = hn)(UpSampling2D(size = (2,2))(conv7))
+    merge8 = concatenate([conv2,up8], axis = 3)
+    conv8 = Conv2D(128, 3, activation = 'relu', padding = 'same', kernel_initializer = hn)(merge8)
+    conv8 = Conv2D(128, 3, activation = 'relu', padding = 'same', kernel_initializer = hn)(conv8)
+
+    up9 = Conv2D(64, 2, activation = 'relu', padding = 'same', kernel_initializer = hn)(UpSampling2D(size = (2,2))(conv8))
+    merge9 = concatenate([conv1,up9], axis = 3)
+    conv9 = Conv2D(64, 3, activation = 'relu', padding = 'same', kernel_initializer = hn)(merge9)
+    conv9 = Conv2D(64, 3, activation = 'relu', padding = 'same', kernel_initializer = hn)(conv9)
+    #conv9 = Conv2D(2, 3, activation = 'relu', padding = 'same', kernel_initializer = 'he_normal')(conv9)
+    
+    conv10 = Conv2D(4, (1,1), activation = 'softmax')(conv9)
+    
+    model = Model(inputs = inputs, outputs = conv10)
+
+    return model
+
+# plt.imshow(normalize_2D_image(bimg[8]))
+
+#***
+
+def generate_train_batch(batch_size = 12, df = df_train):
+    
+    batch_images = np.zeros((batch_size, 240, 240, 4), np.float32)
+    batch_label = np.zeros((batch_size, 240, 240, 1), np.int8)    
+    
+    # lab1 22%
+    # lab2 58%
+    # lab3 18%
+
+    while 1:
+         
+        i = 0
+        
+        # lab 1
+        nim = batch_size//4
+        for j in range(nim):
+            im,lbl = get_img_for_label(lab=1, axis=random.choice([0,1,2]), df=df)
+            batch_images[i] = im/im.max()
+            batch_label[i,:,:,0] = lbl
+            i+=1
+
+
+            # lab 2
+        nim = batch_size//2
+        for j in range(nim):
+            im,lbl = get_img_for_label(lab=2, axis=random.choice([0,1,2]), df=df)
+            batch_images[i] = im/im.max()
+            batch_label[i,:,:,0] = lbl
+            i+=1
+            
+        # lab 3
+        nim = batch_size//4
+        for j in range(nim):
+            im,lbl = get_img_for_label(lab=3, axis=random.choice([0,1,2]), df=df)
+            batch_images[i] = im/im.max()
+            batch_label[i,:,:,0] = lbl
+            i+=1
+
+        # The rest
+        nim = batch_size - i
+        for j in range(nim):
+            im,lbl = get_random_img(axis=random.choice([0,1,2]), df=df)
+            batch_images[i] = im/im.max()
+            batch_label[i,:,:,0] = lbl
+            i+=1
+                    
+        batch_images, batch_label = shuffle(batch_images, batch_label)
+            
+        yield batch_images, np_utils.to_categorical(batch_label, 4)
+
+# ############################################16
+# %%time
+# gen_train = generate_train_batch(batch_size=10)
+# bimg,blbl = next(gen_train)
+# bimg.shape, blbl.shape
+
+# show_img_lable(bimg[i], blbl[i])
+
+import sys
+sys.path.append('local_modules')
+import tensorflow as tf
+from keras import backend as K
+
+from keras.models import Model, load_model
+from keras.layers import Input, BatchNormalization, Activation, Dense, Dropout
+from keras.layers.core import Lambda, RepeatVector, Reshape
+from keras.layers.convolutional import Conv2D, Conv2DTranspose
+from keras.layers.pooling import MaxPooling2D, GlobalMaxPool2D
+from keras.layers import Input, UpSampling2D
+from keras.layers.merge import concatenate, add
+from keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
+from keras.optimizers import Adam
+from keras.preprocessing.image import ImageDataGenerator, array_to_img, img_to_array, load_img
+
+
+IMG_HEIGHT = 240
+IMG_WIDTH = 240
+IMG_CHANNELS = 4
+
+from keras import backend as K 
+
+# Do some code, e.g. train and save model
+
+K.clear_session()
+
+
+import model_unet
+reload(model_unet)
+
+
+
+from keras.utils import multi_gpu_model
+
+# Instantiate the base model (or "template" model).
+# We recommend doing this with under a CPU device scope,
+# so that the model's weights are hosted on CPU memory.
+# Otherwise they may end up hosted on a GPU, which would
+# complicate weight sharing.
+# with tf.device('/cpu:0'):
+    # model = model_unet.unet(input_size = (IMG_HEIGHT,IMG_WIDTH,IMG_CHANNELS))
+
+# Replicates the model on 8 GPUs.
+# This assumes that your machine has 8 available GPUs.
+# parallel_model = multi_gpu_model(model, gpus=2)
+import model_unet
+
+model = model_unet.unet(input_size = (IMG_HEIGHT,IMG_WIDTH,IMG_CHANNELS))
+
+model.compile(loss='categorical_crossentropy',
+                       optimizer = Adam(lr = 0.0001),
+                      metrics=['accuracy'])
+
+
+model.summary()
+
+
+
+# %%time
+# gen_train = generate_train_batch(batch_size=36)
+# bimg,blbl = next(gen_train)
+# bimg.shape, blbl.shape
+
+# from keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
+
+# earlystopper = EarlyStopping(patience=8, verbose=1)
+# checkpointer = ModelCheckpoint(filepath = 'model_unet_4ch_4.hdf5',
+#                                verbose=1,
+#                                save_best_only=True, save_weights_only = True)
+
+# reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5,
+#                               patience=5, min_lr=0.000001, verbose=1,  cooldown=1)
+
+
+# history = model.fit_generator(gen_train,steps_per_epoch=10,
+#                                         validation_data =( bimg,blbl), 
+#                               #validation_data =gen_test_im, validation_steps=2,
+                                          
+#                               epochs=20,
+#                     callbacks=[earlystopper, checkpointer])
+
+# vu.drow_history(history)
+
+ model.load_weights('model_unet_4ch_2 (24).hdf5')
+
+def get_pred(img, threshold=0.5):
+    out_img=img.copy()
+    out_img=np.where(out_img>threshold, 1,0)
+    return out_img
+
+def prediction_from_probabily_3D(img):
+    
+    int_image = get_pred(img)
+    return lbl_from_cat(int_image)
+
+def get_prediction_for_batch(pred_batch, threshold=0.5):
+    
+    out_batch = np.zeros((pred_batch.shape[0], 240, 240),dtype=np.int)
+    
+    for j in range(pred_batch.shape[0]):
+        pred = get_prediction(pred_batch[j])
+        if (pred.sum()>0):
+            print(j, np.unique(pred , return_counts=True))
+        out_batch[j] = lbl_from_cat(get_prediction(pred_batch[j]))
+    return out_batch
+
+def get_label_from_pred_batch(labels_batch):
+    
+    batch = np.zeros((labels_batch.shape[0], 240, 240), np.uint8)
+     
+    for j in range(labels_batch.shape[0]):
+        batch[j]=get_pred(labels_batch[j,:,:,0])+\
+                get_pred(labels_batch[j,:,:,1])*2+\
+        get_pred(labels_batch[j,:,:,2])*4
+
+    return batch
+
+def predict_3D_img_prob(np_file):
+    
+    np_img = np.load(np_file)
+    for_pred_img = np.zeros((155, 240, 240, 4), np.float32)
+
+    # Normalize image
+    for_pred_img = normalize_3D_image(np_img)
+
+    mdl_pred_img =  model.predict(for_pred_img)
+    
+
+    #pred_label = prediction_from_probabily_3D(mdl_pred_img)
+
+    return mdl_pred_img
+
+img_id = 'Brats17_2013_0_1'
+im,lb = get_numpy_img_lbl(img_id = 'Brats17_2013_0_1')
+
+# img_id = 'Brats17_2013_23_1'
+# im,lb = get_numpy_img_lbl(img_id = 'Brats17_2013_23_1')
+
+
+im.shape,lb.shape
+
+nimg = os.path.join(NUMPY_DIR, img_id+'.npy')
+pred_stats = predict_3D_img_prob(nimg)
+pred_stats.shape
+
+pred = prediction_from_probabily_3D(pred_stats)
+pred.shape
+
+np.unique(pred)
+
+ind=[80]
+for i in ind:
+    show_lable(pred_stats[i])
+    show_lable(get_pred(pred_stats[i]))
+    show_pred_im_lable(im[i], lb[i], pred[i])
+
+
+# model.load_weights('model_unet_4ch_2 (16).hdf5')
+
+# gen_train = generate_train_batch(batch_size=10)
+# bimg,blbl = next(gen_train)
+# bimg.shape, blbl.shape
+
+
+gen_test_im = generate_im_test_batch(5)
+imtest,lbtest = next(gen_test_im)
+imtest.shape, lbtest.shape
+
+# from keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
+
+# earlystopper = EarlyStopping(patience=8, verbose=1)
+# checkpointer = ModelCheckpoint(filepath = 'model_unet_4ch_2 (17).hdf5',
+#                                verbose=1,
+#                                save_best_only=True, save_weights_only = True)
+
+# reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5,
+#                               patience=5, min_lr=0.000001, verbose=1,  cooldown=1)
+
+
+
+# model.compile(loss=dice_coef_loss,
+#                        optimizer = Adam(lr = 0.0001),
+#                       metrics=['accuracy', 'categorical_crossentropy'])
+
+
+
+# history = model.fit_generator(gen_train,steps_per_epoch=20,
+#                                         # validation_data =( bimg,blbl), 
+#                               validation_data =(imtest,lbtest), validation_steps=1,
+                                          
+#                               epochs=15,
+#                     callbacks=[earlystopper, checkpointer])
+
+
+# vu.drow_history(history)
+
+# img_id = 'Brats17_2013_0_1'
+# im,lb = get_numpy_img_lbl(img_id = 'Brats17_2013_0_1')
+# im.shape,lb.shape
+
+# nimg = os.path.join(NUMPY_DIR, img_id+'.npy')
+# pred_stats = predict_3D_img_prob(nimg)
+# pred_stats.shape
+
+# pred = prediction_from_probabily_3D(pred_stats)
+# pred.shape
+
+# np.unique(pred)
+
+# ind=[80]
+# for i in ind:
+#     show_lable(pred_stats[i])
+#     show_lable(get_pred(pred_stats[i]))
+#     show_pred_im_lable(im[i], lb[i], pred[i])
+
+# model.save_weights('model_unet_4ch_2 (17).hdf5')
+
+from keras import backend as K
+from keras.layers import Input, MaxPooling2D, UpSampling2D, Conv2D
+from keras.layers import concatenate
+from keras.models import Model
+from keras.optimizers import Adam
+
+smooth = 1.
+
+
+def dice_coef(y_true, y_pred):
+    y_true_f = K.flatten(y_true)
+    y_pred_f = K.flatten(y_pred)
+    intersection = K.sum(y_true_f * y_pred_f)
+    return (2. * intersection + smooth) / (K.sum(y_true_f) + K.sum(y_pred_f) + smooth)
+
+
+def dice_coef_loss(y_true, y_pred):
+    return -dice_coef(y_true, y_pred)
+
+def dice_coef4(y_true, y_pred):
+    y_true_f = K.flatten(y_true[:,:,:,1:4])
+    y_pred_f = K.flatten(y_pred[:,:,:,1:4])
+    intersection = K.sum(y_true_f * y_pred_f)
+    return (2. * intersection + smooth) / (K.sum(y_true_f) + K.sum(y_pred_f) + smooth)
+
+
+def dice_coef_loss4(y_true, y_pred):
+    return -dice_coef4(y_true, y_pred)
+
+def logit_categorical_crossentropy(y_true, y_pred):
+    return K.categorical_crossentropy(y_true, y_pred, from_logits=True)
+
+def logit_categorical_crossentropy4(y_true, y_pred):
+    return K.categorical_crossentropy(y_true[:,:,:,1:4], y_pred[:,:,:,1:4], from_logits=True)
+
+def categorical_crossentropy4(y_true, y_pred):
+    return K.categorical_crossentropy(y_true[:,:,:,1:4], y_pred[:,:,:,1:4])
+
+import keras
+def accuracy4(y_true, y_pred):
+    return keras.metrics.accuracy(y_true[:,:,:,1:4], y_pred[:,:,:,1:4])
+
+def jaccard_distance_loss(y_true, y_pred, smooth=100):
+    """
+    Jaccard = (|X & Y|)/ (|X|+ |Y| - |X & Y|)
+            = sum(|A*B|)/(sum(|A|)+sum(|B|)-sum(|A*B|))
+    
+    The jaccard distance loss is usefull for unbalanced datasets. This has been
+    shifted so it converges on 0 and is smoothed to avoid exploding or disapearing
+    gradient.
+    
+    Ref: https://en.wikipedia.org/wiki/Jaccard_index
+    
+    @url: https://gist.github.com/wassname/f1452b748efcbeb4cb9b1d059dce6f96
+    @author: wassname
+    """
+    intersection = K.sum(K.abs(y_true * y_pred), axis=-1)
+    sum_ = K.sum(K.abs(y_true) + K.abs(y_pred), axis=-1)
+    jac = (intersection + smooth) / (sum_ - intersection + smooth)
+    return (1 - jac) * smooth
+
+def jaccard_distance_loss4(y_true, y_pred, smooth=100):
+
+    intersection = K.sum(K.abs(y_true[:,:,:,1:4] * y_pred[:,:,:,1:4]), axis=-1)
+    sum_ = K.sum(K.abs(y_true[:,:,:,1:4]) + K.abs(y_pred[:,:,:,1:4]), axis=-1)
+    jac = (intersection + smooth) / (sum_ - intersection + smooth)
+    return (1 - jac) * smooth
+
+def jac_dice4(y_true, y_pred):
+    
+    return jaccard_distance_loss4(y_true, y_pred) - 1. -dice_coef4(y_true, y_pred)-dice_coef(y_true, y_pred)*0.5
+
+def jac_dice_cross4(y_true, y_pred):
+    
+    return jac_dice4(y_true, y_pred)-(1.-logit_categorical_crossentropy4(y_true, y_pred))-dice_coef(y_true, y_pred)*0.5
+
+df_test.shape, df_train.shape
+
+df_test.head()
+
+df_test=df_test.sort_values(['lab1','lab3']).reset_index()
+df_test.tail()
+
+df_test2 = df_test.iloc[44:].copy()
+df_test2['Grade'].value_counts()
+
+df_train['Grade'].value_counts()
+
+df_train2 = pd.concat([df_train, df_test.iloc[0:44].copy()], axis=1)
+df_train2.head()
+
+df_test=df_test2
+df_train=df_train2
+
+# model.compile(loss=dice_coef_loss4,
+#                        optimizer = Adam(lr = 0.00001),
+#                       metrics=[accuracy4, categorical_crossentropy4])
+
+
+# model.compile(loss=jaccard_distance_loss,
+#                        optimizer = Adam(lr = 0.00001),
+#                       metrics=[accuracy4, dice_coef_loss4])
+
+
+model.compile(loss=jac_dice4,
+                       optimizer = Adam(lr = 0.00001),
+                      metrics=[accuracy4, dice_coef_loss4])
+
+# model.compile(loss=dice_coef_loss4,
+#                        optimizer = Adam(lr = 0.00001),
+#                       metrics=['accuracy', 'categorical_crossentropy'])
+
+
+gen_train = generate_train_batch(batch_size=12)
+bimg,blbl = next(gen_train)
+bimg.shape, blbl.shape
+
+earlystopper = EarlyStopping(patience=8, verbose=1)
+checkpointer = ModelCheckpoint(filepath = 'model_unet_4ch_2 (25).hdf5',
+                               verbose=1,
+                               save_best_only=True, save_weights_only = True)
+
+
+
+reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5,
+                              patience=5, min_lr=0.000001, verbose=1,  cooldown=1)
+
+
+history = model.fit_generator(gen_train,steps_per_epoch=20,
+                                        #validation_data =( imtest,lbtest), 
+                              validation_data =(imtest,lbtest), validation_steps=3,
+                              
+                                          
+                              epochs=20,
+                    callbacks=[earlystopper, checkpointer])
+
+vu.drow_history(history)
+
+model.load_weights('model_unet_4ch_2 (25).hdf5')
+
+
+im,lb = get_numpy_img_lbl(img_id = 'Brats17_2013_23_1')
+im.shape,lb.shape
+
+nimg = os.path.join(NUMPY_DIR, img_id+'.npy')
+pred_stats = predict_3D_img_prob(nimg)
+pred_stats.shape
+
+pred = prediction_from_probabily_3D(pred_stats)
+pred.shape
+
+np.unique(pred)
+
+ind=[80]
+for i in ind:
+    show_lable(pred_stats[i])
+    show_lable(get_pred(pred_stats[i]))
+    show_pred_im_lable(im[i], lb[i], pred[i])
+
+model.save_weights('model_unet_4ch_2 (25).hdf5')
+
+model.save_weights('/content/drive/My Drive/BRATS2017/model_unet_4ch_2 (25).hdf5')
